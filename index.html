@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dark Forest</title>
+    <link rel="stylesheet" href="css/main.css" />
+    <style>
+      body {
+        font-family: Mukta, Arial, Helvetica, sans-serif;
+      }
+
+      #blocker {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+      }
+
+      /* The Modal (background) */
+      .modal {
+        display: none; /* Hidden by default */
+        position: fixed; /* Stay in place */
+        z-index: 1; /* Sit on top */
+        left: 0;
+        top: 0;
+        width: 100%; /* Full width */
+        height: 100%; /* Full height */
+        overflow: auto; /* Enable scroll if needed */
+        padding-top: 100px;
+        background-color: rgb(0, 0, 0); /* Fallback color */
+        background-color: rgba(0, 0, 0, 0.8); /* Black w/ opacity */
+      }
+
+      #instructions {
+        width: 100%;
+        height: 100%;
+
+        display: -webkit-box;
+        display: -moz-box;
+        display: box;
+
+        -webkit-box-orient: horizontal;
+        -moz-box-orient: horizontal;
+        box-orient: horizontal;
+
+        -webkit-box-pack: center;
+        -moz-box-pack: center;
+        box-pack: center;
+
+        -webkit-box-align: center;
+        -moz-box-align: center;
+        box-align: center;
+
+        color: #ffffff;
+        text-align: center;
+        font-size: 14px;
+        line-height: 24px;
+
+        cursor: pointer;
+      }
+
+      /* Set a style for all buttons */
+      button {
+        background-color: #04aa6d;
+        color: white;
+        padding: 20px 20px;
+        margin: 10px 0px;
+        border: none;
+        cursor: pointer;
+        width: 100%;
+        opacity: 0.8;
+        border-radius: 5px;
+      }
+
+      button:hover {
+        opacity: 1;
+      }
+
+      /* Float cancel and delete buttons and add an equal width */
+      #correctbtn,
+      #incorrectbtn {
+        width: 45%;
+      }
+
+      /* Add a color to the correct button */
+      #correctbtn {
+        background-color: #04aa6d;
+      }
+
+      /* Add a color to the incorrect button */
+      #incorrectbtn {
+        background-color: #f44336;
+      }
+
+      /* Add padding and center-align text to the container */
+      .container {
+        padding: 20px;
+        text-align: center;
+      }
+
+      /* Modal Content/Box */
+      .modal-content {
+        background-color: #fefefe;
+        margin: 10% auto 10% auto; /* 5% from the top, 15% from the bottom and centered */
+        width: 50%; /* Could be more or less, depending on screen size */
+        border-radius: 10px;
+        justify-content: space-between;
+        -webkit-animation-name: animatetop;
+        -webkit-animation-duration: 0.5s;
+        animation-name: animatetop;
+        animation-duration: 0.5s;
+      }
+
+      /* Add Animation */
+      @-webkit-keyframes animatetop {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes animatetop {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="blocker">
+      <div id="instructions">
+        <span style="font-size: 36px">Click to play</span>
+        <br /><br />
+        Move: WASD<br />
+        Jump: SPACE<br />
+        Look: MOUSE
+      </div>
+    </div>
+
+    <div id="questionPopUp" class="modal">
+      <div class="modal-content">
+        <div class="container">
+          <h1>Question Title</h1>
+          <p>Question goes here.</p>
+          <div class="clearfix">
+            <button type="button" id="correctbtn">Correct</button>
+            <button type="button" id="incorrectbtn">Incorrect</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from './js/three.module.js';
+      import { PointerLockControls } from './js/PointerLockControls.js';
+      import { GLTFLoader } from './js/GLTFLoader.js';
+      import { FBXLoader } from './js/FBXLoader.js';
+      import { EffectComposer } from './js/EffectComposer.js';
+      import { RenderPass } from './js/RenderPass.js';
+      import { OutlinePass } from './js/OutlinePass.js';
+      import { FXAAShader } from './js/FXAAShader.js';
+      import { ShaderPass } from './js/ShaderPass.js';
+
+      const glowVertexShader = `
+        uniform vec3 viewVector;
+        uniform float c;
+        uniform float p;
+        uniform float op;
+        uniform float opacity;
+        uniform float intensity;
+
+        void main() {
+          opacity = 1.0;
+          vec3 vNormal = normalize(normalMatrix * normal *2.0);
+          vec3 vNormel = normalize(normalMatrix * viewVector);
+          intensity = pow(c - dot(vNormal, vNormel), p);
+          opacity = op;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+
+      const glowFragmentShader = `
+        uniform vec3 glowColor;
+        varying float intensity;
+        varying float opacity;
+
+        void main() {
+          vec3 glow = glowColor * intensity;
+          gl_FragColor = vec4(glow, opacity);
+        }
+      `;
+
+      let camera, scene, renderer, controls;
+      let moveForward = false;
+      let moveBackward = false;
+      let moveLeft = false;
+      let moveRight = false;
+      let canJump = false;
+      let towers = [];
+      let obstacles = [];
+      let trees = [];
+      let powerUps = [];
+      let tower_mixers = [];
+      let pathSegments = [];
+      let character_actions = [];
+      let character_anims_index = 1;
+      let character_anims = ['idle', 'run', 'strafe_left', 'strafe_right', 'jump', 'attack', 'get_hurt', 'die'];
+      let character;
+      let character_mixer;
+      let character_action;
+      let troll_actions = [];
+      let troll_anims_index = 1;
+      let troll_anims = ['idle', 'walk', 'dance', 'taunt', 'attack', 'get_hurt', 'die'];
+      let troll;
+      let troll_mixer;
+      let troll_action;
+      let pathSegment = 0;
+      let pathSegmentCurrent = 0;
+      let pathLength = 100;
+      let pathPerTower = 10;
+      let cScale = 38;
+      let prevTime = performance.now();
+      let freezeForward = false;
+      let trollEngage = false;
+      let trollEngageResult = 'none';
+      let spotlight;
+      let F1Raycaster, F2Raycaster;
+      let X1Raycaster, X2Raycaster, X3Raycaster;
+      let B1Raycaster, B2Raycaster, B3Raycaster;
+      let L1Raycaster, R1Raycaster, L2Raycaster, R2Raycaster;
+      let F1Intersect, F2Intersect;
+      let X1Intersect, X2Intersect, X3Intersect;
+      let B1Intersect, B2Intersect, B3Intersect;
+      let L1Intersect, R1Intersect, L2Intersect, R2Intersect;
+      let prevYPos = 10;
+      let composer;
+      let numberofQuestions = 5;
+      let characterSighted = false;
+      let manager = new THREE.LoadingManager();
+
+      // let F1Helper, F2Helper;
+      // let B1Helper, B2Helper, B3Helper;
+      // let X1Helper, X2Helper, X3Helper;
+      // let L1Helper, L2Helper, R1Helper, R2Helper;
+
+      const velocity = new THREE.Vector3();
+      const direction = new THREE.Vector3();
+      const vertex = new THREE.Vector3();
+      const color = new THREE.Color();
+      const rotation = new THREE.Vector3();
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+
+      manager.onStart = function (url, itemsLoaded, itemsTotal) {
+        console.log('Started loading file: ' + url + '.\nLoaded ' + itemsLoaded + ' of ' + itemsTotal + ' files.');
+      };
+
+      manager.onLoad = function () {
+        console.log('Loading complete!');
+      };
+
+      init();
+
+      function init() {
+        // setup camera
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
+
+        // setup scene
+        scene = new THREE.Scene();
+
+        const loader = new THREE.TextureLoader(manager);
+        const bgTexture = loader.load('graphics/df.png');
+        scene.background = bgTexture;
+
+        // sky box
+        // const loader = new THREE.CubeTextureLoader();
+        // const bgTexture = loader.load([
+        //   'graphics/posx.jpg',
+        //   'graphics/negx.jpg',
+        //   'graphics/posy.jpg',
+        //   'graphics/negy.jpg',
+        //   'graphics/posz.jpg',
+        //   'graphics/negz.jpg',
+        // ]);
+        // scene.background = bgTexture;
+
+        // fog
+        //scene.fog = new THREE.Fog(0xffffff, 200, 2000);
+
+        //setup light
+        const light = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
+        scene.add(light);
+        const ambient = new THREE.AmbientLight(0xffffff); // soft white light
+        scene.add(ambient);
+
+        const directional = new THREE.DirectionalLight(0xffff00, 0.5);
+        directional.position.y = 150;
+        directional.position.x = -100;
+        directional.castShadow = true;
+        directional.shadow.mapSize.width = 4096 / 2;
+        directional.shadow.camera.left = -200 * numberofQuestions * pathPerTower;
+        directional.shadow.camera.right = 300;
+        directional.shadow.camera.top = 1000;
+        directional.shadow.camera.bottom = -250;
+        scene.add(directional);
+        //scene.add(new THREE.CameraHelper(directional.shadow.camera));
+
+        // spotlight = new THREE.SpotLight(0xffffff, 0.5);
+        // spotlight.position.set(30, 30, 100);
+        // spotlight.castShadow = true;
+        // scene.add(spotlight);
+
+        // setup raycasters
+        F1Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), 0, 25);
+        F2Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), 0, 25);
+        X1Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), 0, 40);
+        X2Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1), 0, 40);
+        X3Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(1, 0, 0), 0, 30);
+        L1Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(-1, 0, 0), 0, 22);
+        L2Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(-1, 0, 0), 0, 22);
+        R1Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(1, 0, 0), 0, 22);
+        R2Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(1, 0, 0), 0, 22);
+        B1Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20);
+        B2Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20);
+        B3Raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20);
+
+        // F1Helper = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), F1Raycaster.far, 0xff0000);
+        // F2Helper = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), F2Raycaster.far, 0xff0000);
+        // X1Helper = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), X1Raycaster.far, 0xffff00);
+        // X2Helper = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), X2Raycaster.far, 0xffff00);
+        // X3Helper = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), X3Raycaster.far, 0xffff00);
+        // L1Helper = new THREE.ArrowHelper(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(), L1Raycaster.far, 0x00ff00);
+        // L2Helper = new THREE.ArrowHelper(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(), L2Raycaster.far, 0x00ff00);
+        // R1Helper = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), R1Raycaster.far, 0x0000ff);
+        // R2Helper = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), R2Raycaster.far, 0x0000ff);
+        // B1Helper = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), B1Raycaster.far, 0x00ffff);
+        // B2Helper = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), B2Raycaster.far, 0x00ffff);
+        // B3Helper = new THREE.ArrowHelper(new THREE.Vector3(0, -1, 0), new THREE.Vector3(), B3Raycaster.far, 0x00ffff);
+        // scene.add(
+        //   F1Helper,
+        //   F2Helper,
+        //   X1Helper,
+        //   X2Helper,
+        //   X3Helper,
+        //   L1Helper,
+        //   R1Helper,
+        //   L2Helper,
+        //   R2Helper,
+        //   B1Helper,
+        //   B2Helper,
+        //   B3Helper,
+        // );
+
+        // setup controls
+        controls = new PointerLockControls(camera, document.body);
+        controls.minPolarAngle = Math.PI / 2.5;
+        controls.maxPolarAngle = Math.PI / 1.8;
+
+        // setup blocker when game is paused
+        const blocker = document.getElementById('blocker');
+        const instructions = document.getElementById('instructions');
+
+        //setup questionPopUp
+        const questionPopUp = document.getElementById('questionPopUp');
+        const correctbtn = document.getElementById('correctbtn');
+        const incorrectbtn = document.getElementById('incorrectbtn');
+
+        correctbtn.addEventListener('click', function () {
+          questionPopUp.style.display = 'none';
+          trollEngageResult = 'win';
+          controls.lock();
+        });
+
+        incorrectbtn.addEventListener('click', function () {
+          questionPopUp.style.display = 'none';
+          trollEngageResult = 'lose';
+          controls.lock();
+        });
+
+        instructions.addEventListener('click', function () {
+          controls.lock();
+        });
+
+        controls.addEventListener('lock', function () {
+          if (trollEngage) {
+            //
+          } else {
+            instructions.style.display = 'none';
+            blocker.style.display = 'none';
+          }
+        });
+
+        controls.addEventListener('unlock', function () {
+          if (trollEngage) {
+            questionPopUp.style.display = 'block';
+          } else {
+            blocker.style.display = 'block';
+            instructions.style.display = '';
+          }
+        });
+
+        scene.add(controls.getObject());
+
+        // setup keyboard listeners
+        const onKeyUp = function (event) {
+          switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW':
+              moveForward = false;
+              break;
+
+            case 'ArrowLeft':
+            case 'KeyA':
+              moveLeft = false;
+              break;
+
+            case 'ArrowRight':
+            case 'KeyD':
+              moveRight = false;
+              break;
+          }
+        };
+
+        const onKeyDown = function (event) {
+          switch (event.code) {
+            case 'ArrowUp':
+            case 'KeyW':
+              moveForward = true;
+              break;
+
+            case 'ArrowLeft':
+            case 'KeyA':
+              moveLeft = true;
+              break;
+
+            case 'ArrowRight':
+            case 'KeyD':
+              moveRight = true;
+              break;
+
+            case 'Space':
+              if (canJump === true) velocity.y += 300;
+              canJump = false;
+              break;
+          }
+        };
+
+        document.addEventListener('keyup', onKeyUp);
+        document.addEventListener('keydown', onKeyDown);
+
+        // setup renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+        window.addEventListener('resize', onWindowResize);
+
+        // load the 3d models
+        loadModels();
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        composer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function loadModels() {
+        // running character
+        const charloader = new FBXLoader(manager);
+        charloader.load('./graphics/hero.fbx', model => {
+          character_mixer = new THREE.AnimationMixer(model);
+          character = model;
+          character.traverse(c => {
+            if (c.isMesh) {
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+          });
+          // set character skin!
+          //character.children[0].material.map = new THREE.TextureLoader().load('./graphics/character_blue.png');
+          //character.children[0].material.color = { r: 0.5, g: 0.5, b: 0.5 };
+
+          loadAnimation(charloader);
+        });
+
+        // troll
+        const charTrollloader = new FBXLoader(manager);
+        charTrollloader.load('./graphics/troll.fbx', model => {
+          troll_mixer = new THREE.AnimationMixer(model);
+          troll = model;
+          troll.isDead = false;
+          troll.traverse(c => {
+            if (c.isMesh) {
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+          });
+          troll.scale.set(0.5, 0.5, 0.5);
+          troll.position.set(0, -65, -pathLength * pathPerTower);
+          loadTrollAnimation(charTrollloader);
+        });
+
+        // load path
+        const gltfLoader = new GLTFLoader(manager);
+        gltfLoader.load(
+          './graphics/path5.glb',
+          pathSegment => {
+            pathSegment.scene.traverse(c => {
+              if (c.isMesh) {
+                if (c.name == 'sunray') {
+                  changeMaterialToLight(c);
+                } else {
+                  c.receiveShadow = true;
+                }
+              }
+            });
+            pathSegment.scene.scale.set(100, 100, 100);
+            pathSegment.scene.position.y = -65;
+            for (let i = 0; i < pathPerTower * numberofQuestions + 1; i++) {
+              let pathSegmentCopy = pathSegment.scene.clone();
+              pathSegmentCopy.position.z = i * -pathLength;
+              scene.add(pathSegmentCopy);
+              pathSegments.push(pathSegmentCopy);
+            }
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        function changeMaterialToLight(objectToChange) {
+          let changedMaterial = new THREE.MeshBasicMaterial({
+            side: THREE.FrontSide,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            depthWrite: false,
+          });
+
+          changedMaterial.onBeforeCompile = function (shader) {
+            shader.uniforms.c = { type: 'f', value: 1 };
+            shader.uniforms.p = { type: 'f', value: 1.94 };
+            shader.uniforms.glowColor = { type: 'c', value: new THREE.Color('#fcfcdd') };
+            shader.uniforms.viewVector = { type: 'v3', value: camera.position };
+            shader.uniforms.op = { type: 'f', value: 0.03 };
+            shader.vertexShader = glowVertexShader;
+            shader.fragmentShader = glowFragmentShader;
+            changedMaterial.userData.shader = shader;
+          };
+          objectToChange.material = changedMaterial;
+          objectToChange.needsUpdate = true;
+        }
+
+        //load trees
+        gltfLoader.load(
+          './graphics/tree.glb',
+          tree => {
+            tree.scene.traverse(c => {
+              if (c.isMesh) {
+                c.castShadow = true;
+                c.receiveShadow = true;
+              }
+            });
+
+            tree.scene.position.y = -65;
+
+            for (let i = 0; i < (pathPerTower * (numberofQuestions - 2) - 4) * 2; i++) {
+              let treeCopy = tree.scene.clone();
+              switch (i % 4) {
+                case 0:
+                  treeCopy.scale.set(150, 170 + Math.ceil(Math.random() * 4) * 10, 150);
+                  treeCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 60 - 30);
+                  treeCopy.position.x = 350 + (Math.random() * 20 - 10);
+                  break;
+                case 1:
+                  treeCopy.scale.set(150, 170 + Math.ceil(Math.random() * 4) * 10, 150);
+                  treeCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 60 - 30) - 40;
+                  treeCopy.position.x = -350 + (Math.random() * 20 - 10);
+                  break;
+              }
+              treeCopy.rotateX(Math.random() / 2.5);
+              randomizeTransformObject(treeCopy, true);
+
+              scene.add(treeCopy);
+              trees.push(treeCopy);
+            }
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        //load ferns
+        for (let j = 1; j <= 3; j++) {
+          gltfLoader.load(
+            `./graphics/fern${j}.glb`,
+            fern => {
+              fern.scene.traverse(c => {
+                if (c.isMesh) {
+                  c.castShadow = true;
+                  c.receiveShadow = true;
+                }
+              });
+
+              fern.scene.position.y = -65;
+              for (let i = 0; i < (pathPerTower * (numberofQuestions - 2) - 4) * 2; i++) {
+                let fernCopy = fern.scene.clone();
+                let size = 180 + Math.random() * 40 - 20;
+                fernCopy.scale.set(size, size, size);
+                switch (j) {
+                  case 1:
+                    fernCopy.position.x = 330 + (Math.random() * 100 - 50);
+                    fernCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20) - 20;
+                    break;
+                  case 2:
+                    fernCopy.position.x = 200 + (Math.random() * 40 - 20);
+                    fernCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20) - 40;
+                    break;
+                  case 3:
+                    fernCopy.position.x = 140 + (Math.random() * 40 - 20);
+                    fernCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20) - 80;
+                    break;
+                }
+
+                if (i % 2 == 1) fernCopy.position.x *= -1;
+                randomizeTransformObject(fernCopy, true);
+                scene.add(fernCopy);
+              }
+            },
+            undefined,
+            function (strError) {
+              console.log(strError);
+            },
+          );
+        }
+
+        //load grass
+        for (let j = 1; j <= 3; j++) {
+          gltfLoader.load(
+            `./graphics/grass${j}.glb`,
+            grass => {
+              grass.scene.traverse(c => {
+                if (c.isMesh) {
+                  c.castShadow = true;
+                  c.receiveShadow = true;
+                }
+              });
+              grass.scene.position.y = -65;
+              for (let i = 0; i < pathPerTower * numberofQuestions - 1; i++) {
+                let grassCopy = grass.scene.clone();
+                let size = 100;
+                grassCopy.scale.set(size, size, size);
+                grassCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20);
+                grassCopy.position.x = (Math.random() * 20 - 10) * 14;
+                randomizeTransformObject(grassCopy, true);
+                scene.add(grassCopy);
+              }
+            },
+            undefined,
+            function (strError) {
+              console.log(strError);
+            },
+          );
+        }
+
+        //more grass
+        for (let j = 1; j <= 2; j++) {
+          gltfLoader.load(
+            `./graphics/grass${j}.glb`,
+            grass => {
+              grass.scene.traverse(c => {
+                if (c.isMesh) {
+                  c.castShadow = true;
+                  c.receiveShadow = true;
+                }
+              });
+              grass.scene.position.y = -50;
+              for (let i = 0; i < pathPerTower * numberofQuestions - 1; i++) {
+                let grassCopy = grass.scene.clone();
+                let size = 100;
+                grassCopy.scale.set(size, size, size);
+                grassCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20);
+                grassCopy.position.x = 160 + (Math.random() * 20 - 10);
+                if (i % 2 == 1) grassCopy.position.x *= -1;
+                randomizeTransformObject(grassCopy, true);
+                scene.add(grassCopy);
+              }
+            },
+            undefined,
+            function (strError) {
+              console.log(strError);
+            },
+          );
+        }
+
+        //load rocks
+        gltfLoader.load(
+          './graphics/obstacle.glb',
+          rock => {
+            rock.scene.traverse(c => {
+              if (c.isMesh) {
+                c.castShadow = true;
+                c.receiveShadow = true;
+              }
+            });
+
+            rock.scene.position.y = -65;
+            for (let i = 0; i < pathPerTower * (numberofQuestions - 2) * 4; i++) {
+              let rockCopy = rock.scene.clone();
+              let size = 280 + Math.random() * 100 - 50;
+              rockCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 40 - 20) - 60;
+              rockCopy.position.x = 250 + (Math.random() * 100 - 50);
+              if (i % 4 < 2) {
+                size *= 12;
+                rockCopy.position.x = 4000;
+              }
+              rockCopy.scale.set(size, size, size);
+              if (i % 2 == 1) rockCopy.position.x *= -1;
+              randomizeTransformObject(rockCopy, true);
+              scene.add(rockCopy);
+            }
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        //load towers
+        gltfLoader.load(
+          './graphics/tower.glb',
+          tower => {
+            tower.scene.scale.set(140, 140, 40);
+            tower.scene.position.y = -50;
+            for (let i = 0; i < numberofQuestions; i++) {
+              let towerCopy = tower.scene.clone();
+              towerCopy.receiveShadow = true;
+              towerCopy.castShadow = true;
+              towerCopy.position.z = (i + 1) * -(pathLength * pathPerTower);
+              scene.add(towerCopy);
+            }
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        // load hangar
+        gltfLoader.load(
+          './graphics/hangarv5.glb',
+          hangar => {
+            hangar.scene.traverse(c => {
+              if (c.isMesh) {
+                c.castShadow = true;
+                c.receiveShadow = true;
+              }
+            });
+            hangar.scene.scale.set(90, 90, 40);
+            hangar.scene.position.y = -30;
+            hangar.scene.position.z = -pathLength * pathPerTower * numberofQuestions;
+            scene.add(hangar.scene);
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        // access card
+        // gltfLoader.load(
+        //   './graphics/access_card.glb',
+        //   access_card => {
+        //     card = access_card.scene;
+        //     //console.log(card.children[0].material);
+        //     card.scale.set(cScale, cScale, cScale);
+        //     card.children[0].material.opacity = 0;
+        //     card.children[1].material.opacity = 0;
+        //     card.children[0].material.transparent = true;
+        //     card.children[1].material.transparent = true;
+        //     card.position.set(0, 15, -85);
+        //     scene.add(card);
+        //   },
+        //   undefined,
+        //   function (strError) {
+        //     console.log(strError);
+        //   },
+        // );
+
+        // obstacles and powerups
+        gltfLoader.load(
+          './graphics/obstacle.glb',
+          obstacle => {
+            obstacle.scene.traverse(c => {
+              if (c.isMesh) {
+                c.castShadow = true;
+                c.receiveShadow = true;
+              }
+            });
+            obstacle.scene.position.y = -65;
+            for (let i = 0; i < pathPerTower + 2; i++) {
+              let obstacleCopy = obstacle.scene.clone();
+              obstacleCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 60 - 30);
+              scene.add(obstacleCopy);
+              obstacles.push(obstacleCopy);
+            }
+
+            // powerups
+            gltfLoader.load(
+              './graphics/food.glb',
+              powerUp => {
+                powerUp.scene.traverse(c => {
+                  if (c.isMesh) {
+                    c.castShadow = true;
+                    c.receiveShadow = true;
+                  }
+                });
+                powerUp.scene.position.y = -45;
+                powerUp.scene.scale.set(50, 50, 50);
+                for (let i = 0; i < pathPerTower + 2; i++) {
+                  let powerUpCopy = powerUp.scene.clone();
+                  powerUpCopy.position.z = -(i * pathLength) + pathLength / 2 + (Math.random() * 20 - 10);
+                  scene.add(powerUpCopy);
+                  powerUps.push(powerUpCopy);
+                }
+                // set x position of obstacles and powerups
+                for (let i = 0; i < pathPerTower + 2; i++) {
+                  let obstacleXpos = Math.round(Math.random() * 10);
+                  while (pathPerTower % i == 0 && obstacleXpos == 6) obstacleXpos = Math.round(Math.random() * 10);
+                  let powerUpXpos = Math.round(Math.random() * 10);
+                  while (Math.abs(obstacleXpos - powerUpXpos) < 4) powerUpXpos = Math.round(Math.random() * 10);
+                  powerUps[i].position.x = (powerUpXpos - 5) * 15;
+                  obstacles[i].position.x = (obstacleXpos - 5) * 25;
+                  randomizeTransformObject(obstacles[i]);
+                }
+              },
+              undefined,
+              function (strError) {
+                console.log(strError);
+              },
+            );
+          },
+          undefined,
+          function (strError) {
+            console.log(strError);
+          },
+        );
+
+        // setup postprocessing
+        composer = new EffectComposer(renderer);
+        composer.setSize(window.innerWidth, window.innerHeight);
+        composer.addPass(new RenderPass(scene, camera));
+
+        const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+        outlinePass.edgeStrength = 1.5;
+        outlinePass.edgeGlow = 5;
+        outlinePass.edgeThickness = 2;
+        outlinePass.visibleEdgeColor.set('#fcba03');
+        outlinePass.hiddenEdgeColor.set('#000000');
+        outlinePass.selectedObjects = powerUps;
+
+        const effectFXAA = new ShaderPass(FXAAShader);
+        effectFXAA.uniforms['resolution'].value.set(1 / window.innerWidth, 1 / window.innerHeight);
+        effectFXAA.renderToScreen = true;
+        composer.addPass(outlinePass);
+        composer.addPass(effectFXAA);
+      }
+
+      function randomizeTransformObject(obj, isTree = false) {
+        const xScale = 30 + Math.ceil(Math.random() * 5) * 30;
+        const yScale = 25 + Math.ceil(Math.random() * 5) * 30;
+        const zScale = 30 + Math.ceil(Math.random() * 3) * 25;
+        const yRotation = Math.random() * Math.PI;
+
+        if (!isTree) obj.scale.set(xScale, yScale, zScale);
+        obj.rotateY(yRotation);
+      }
+
+      function loadAnimation(loader) {
+        const anim = character_anims.shift();
+        loader.load(`./graphics/${anim}.fbx`, obj => {
+          const action = character_mixer.clipAction(obj.animations[0]);
+          character_actions.push(action);
+          if (character_anims.length > 0) {
+            loadAnimation(loader);
+          } else {
+            playCharAnimation(0);
+            character.rotateY(-Math.PI);
+            character.scale.set(0.35, 0.35, 0.35);
+            scene.add(character);
+            character_mixer.addEventListener('finished', () => {
+              freezeForward = false;
+              trollEngage = false;
+              trollEngageResult = 'none';
+            });
+            animate();
+          }
+        });
+      }
+
+      function loadTrollAnimation(loader) {
+        const anim = 'troll-' + troll_anims.shift();
+        loader.load(`./graphics/${anim}.fbx`, obj => {
+          const action = troll_mixer.clipAction(obj.animations[0]);
+          troll_actions.push(action);
+          if (troll_anims.length > 0) {
+            loadTrollAnimation(loader);
+          } else {
+            playTrollAnimation(0);
+            scene.add(troll);
+            troll_mixer.addEventListener('finished', () => {
+              if (pathSegment / pathPerTower < numberofQuestions) {
+                troll.isDead = true;
+              }
+            });
+          }
+        });
+      }
+
+      function playCharAnimation(index) {
+        if (character_anims_index != index) {
+          const action = character_actions[index];
+          if (index == 5 || index == 6) {
+            action.setLoop(THREE.LoopOnce);
+            action.clampWhenFinished = true;
+          }
+          action.reset();
+          action.crossFadeFrom(character_actions[character_anims_index], 0.2, false);
+          action.play();
+          character_anims_index = index;
+        }
+      }
+
+      function playTrollAnimation(index) {
+        if (troll_anims_index != index) {
+          const action = troll_actions[index];
+          if (index == 4 || index == 6) {
+            action.setLoop(THREE.LoopOnce);
+            action.clampWhenFinished = true;
+          } else action.setLoop(THREE.LoopRepeat);
+          action.reset();
+          action.crossFadeFrom(troll_actions[troll_anims_index], 0.2, false);
+          action.play();
+          troll_anims_index = index;
+        }
+      }
+
+      function displaceObject() {
+        return pathSegment / pathPerTower < numberofQuestions - 1;
+      }
+
+      function animate() {
+        const time = performance.now();
+        const delta = (time - prevTime) / 1000;
+
+        if (controls.isLocked === true) {
+          F1Raycaster.ray.origin.copy(character.position);
+          F2Raycaster.ray.origin.copy(character.position);
+          X1Raycaster.ray.origin.copy(character.position);
+          X2Raycaster.ray.origin.copy(character.position);
+          X3Raycaster.ray.origin.copy(character.position);
+          L1Raycaster.ray.origin.copy(character.position);
+          L2Raycaster.ray.origin.copy(character.position);
+          R1Raycaster.ray.origin.copy(character.position);
+          R2Raycaster.ray.origin.copy(character.position);
+          B1Raycaster.ray.origin.copy(character.position);
+          B2Raycaster.ray.origin.copy(character.position);
+          B3Raycaster.ray.origin.copy(character.position);
+          F1Raycaster.ray.origin.x -= 12;
+          F2Raycaster.ray.origin.x += 12;
+          X1Raycaster.ray.origin.x -= 15;
+          X2Raycaster.ray.origin.x += 15;
+          X1Raycaster.ray.origin.z += 35;
+          X2Raycaster.ray.origin.z += 35;
+          X1Raycaster.ray.origin.y += 20;
+          X2Raycaster.ray.origin.y += 20;
+          X3Raycaster.ray.origin.y += 20;
+          X3Raycaster.ray.origin.x -= 15;
+          B1Raycaster.ray.origin.x -= 10;
+          B2Raycaster.ray.origin.x += 10;
+          X3Raycaster.ray.origin.z += 10;
+          L1Raycaster.ray.origin.z -= 10;
+          R1Raycaster.ray.origin.z -= 10;
+          L2Raycaster.ray.origin.z += 5;
+          R2Raycaster.ray.origin.z += 5;
+          B1Raycaster.ray.origin.y += 5;
+          B2Raycaster.ray.origin.y += 5;
+          B3Raycaster.ray.origin.y += 5;
+
+          // F1Helper.position.copy(F1Raycaster.ray.origin);
+          // F2Helper.position.copy(F2Raycaster.ray.origin);
+          // X1Helper.position.copy(X1Raycaster.ray.origin);
+          // X2Helper.position.copy(X2Raycaster.ray.origin);
+          // X3Helper.position.copy(X3Raycaster.ray.origin);
+          // L1Helper.position.copy(L1Raycaster.ray.origin);
+          // L2Helper.position.copy(L2Raycaster.ray.origin);
+          // R1Helper.position.copy(R1Raycaster.ray.origin);
+          // R2Helper.position.copy(R2Raycaster.ray.origin);
+          // B1Helper.position.copy(B1Raycaster.ray.origin);
+          // B2Helper.position.copy(B2Raycaster.ray.origin);
+          // B3Helper.position.copy(B3Raycaster.ray.origin);
+
+          F1Intersect = F1Raycaster.intersectObjects(obstacles, true).length > 0;
+          F2Intersect = F2Raycaster.intersectObjects(obstacles, true).length > 0;
+          X1Intersect = X1Raycaster.intersectObjects(powerUps, true).length > 0;
+          X2Intersect = X2Raycaster.intersectObjects(powerUps, true).length > 0;
+          X3Intersect = X3Raycaster.intersectObjects(powerUps, true).length > 0;
+          B1Intersect = B1Raycaster.intersectObjects(obstacles, true).length > 0;
+          B2Intersect = B2Raycaster.intersectObjects(obstacles, true).length > 0;
+          B3Intersect = B3Raycaster.intersectObjects(obstacles, true).length > 0;
+          L1Intersect = L1Raycaster.intersectObjects(obstacles, true).length > 0;
+          R1Intersect = R1Raycaster.intersectObjects(obstacles, true).length > 0;
+          L2Intersect = L2Raycaster.intersectObjects(obstacles, true).length > 0;
+          R2Intersect = R2Raycaster.intersectObjects(obstacles, true).length > 0;
+
+          velocity.x -= velocity.x * 5.0 * delta;
+          velocity.z -= velocity.z * 5.0 * delta;
+          velocity.y -= 9.8 * 100.0 * delta; // 100.0 = mass
+
+          direction.z = F1Intersect || F2Intersect ? 0 : Number(moveForward) - Number(moveBackward);
+
+          if (L1Intersect || L2Intersect) {
+            direction.x = Number(moveRight);
+          } else if (R1Intersect || R2Intersect) {
+            direction.x = -Number(moveLeft);
+          } else {
+            direction.x = Number(moveRight) - Number(moveLeft);
+          }
+
+          direction.normalize(); // this ensures consistent movements in all directions
+
+          if ((moveForward || moveBackward) && !freezeForward) {
+            velocity.z -= direction.z * 600.0 * delta;
+          } else velocity.z = 0;
+
+          if (moveLeft || moveRight) {
+            velocity.x -= direction.x * 600.0 * delta;
+          } else velocity.x = 0;
+
+          if (B1Intersect || B2Intersect || B3Intersect) {
+            if (controls.getObject().position.y != prevYPos) canJump = true;
+            velocity.y = Math.max(0, velocity.y);
+            prevYPos = controls.getObject().position.y;
+          }
+
+          controls.moveRight(-velocity.x * delta);
+          controls.moveForward(-velocity.z * delta);
+
+          if (controls.getObject().position.y + velocity.y * delta < 75) {
+            controls.getObject().position.y += velocity.y * delta; // new behavior
+          }
+
+          if (controls.getObject().position.y < 10) {
+            //console.log(controls.getObject().position.y, "talon");
+            velocity.y = 0;
+            controls.getObject().position.y = 10;
+            canJump = true;
+            //alert("canJump floor");
+          }
+
+          if (character_mixer && troll_mixer) {
+            character.position.set(camera.position.x, camera.position.y - 75, camera.position.z - 100);
+            character_mixer.update(delta);
+
+            if (freezeForward && trollEngage) {
+              if (trollEngageResult == 'win') {
+                playCharAnimation(5); // character attack
+                playTrollAnimation(6); //troll die
+              } else if (trollEngageResult == 'lose') {
+                playCharAnimation(6); // character get_hurt
+                playTrollAnimation(4); //troll attack
+              }
+            } else if (!canJump) playCharAnimation(4);
+            else if (moveForward) playCharAnimation(1);
+            else if (moveLeft) playCharAnimation(2);
+            else if (moveRight) playCharAnimation(3);
+            else playCharAnimation(0);
+
+            if (troll.isDead) {
+              troll.position.y -= 3;
+              if (troll.position.y <= -85) {
+                characterSighted = false;
+                troll.position.z -= pathLength * pathPerTower;
+                troll.position.y = -65;
+                troll.isDead = false;
+                playTrollAnimation(0);
+              }
+            } else troll_mixer.update(delta);
+          }
+
+          if (characterSighted)
+            troll.rotation.y = Math.atan2(
+              character.position.x - troll.position.x,
+              character.position.z - troll.position.z,
+            );
+
+          for (let i = 0; i < pathPerTower + 2; i++) powerUps[i].rotation.y += 0.1;
+
+          pathSegmentCurrent = -Math.round((camera.position.z - pathLength) / pathLength);
+
+          if (X1Intersect || X2Intersect || X3Intersect) {
+            //console.log("powerup touched");
+            powerUps[pathSegmentCurrent % (pathPerTower + 2)].visible = false;
+          }
+          if (pathSegment != pathSegmentCurrent) {
+            pathSegment = pathSegmentCurrent;
+            if (pathSegment > 1 && displaceObject()) {
+              obstacles[(pathSegment - 2) % (pathPerTower + 2)].position.z -=
+                pathLength * (pathPerTower + 2) + (Math.random() * 60 - 30);
+              powerUps[(pathSegment - 2) % (pathPerTower + 2)].visible = true;
+              powerUps[(pathSegment - 2) % (pathPerTower + 2)].position.z -=
+                pathLength * (pathPerTower + 2) + (Math.random() * 20 - 10);
+              let obstacleXpos = Math.round(Math.random() * 10);
+              while (pathPerTower % ((pathSegment - 2) % (pathPerTower + 2)) == 0 && obstacleXpos == 6)
+                obstacleXpos = Math.round(Math.random() * 10);
+              let powerUpXpos = Math.round(Math.random() * 10);
+              while (Math.abs(obstacleXpos - powerUpXpos) < 4) powerUpXpos = Math.round(Math.random() * 10);
+              obstacles[(pathSegment - 2) % (pathPerTower + 2)].position.x = (obstacleXpos - 5) * 14;
+              powerUps[(pathSegment - 2) % (pathPerTower + 2)].position.x = (powerUpXpos - 5) * 14;
+              randomizeTransformObject(obstacles[(pathSegment - 2) % (pathPerTower + 2)]);
+            }
+            if (pathSegment % pathPerTower == pathPerTower - 1) {
+              freezeForward = true;
+              trollEngage = true;
+              //trollEngageResult = 'win';
+              //trollEngageResult = confirm('OK = correct; Cancel = incorrect') ? "win" : "lose";
+              //modal.style.display="block";
+              controls.unlock();
+            }
+            if (pathSegment % pathPerTower == pathPerTower - 1) {
+              playTrollAnimation(3); //troll taunt
+            }
+            if (pathSegment % pathPerTower == Math.round(pathPerTower / 2)) {
+              playTrollAnimation(2); //troll dance (replace with shocked)
+              characterSighted = true;
+            }
+          }
+        }
+        prevTime = time;
+        composer.render(delta);
+        requestAnimationFrame(animate);
+      }
+    </script>
+  </body>
+</html>
